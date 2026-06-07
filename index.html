@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GAIT ANALYZER — Real-Time Gait Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466862/drawing_utils.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg: #0a0f14;
+            --surface: #0f181d;
+            --surface-light: #162230;
+            --border: #2a3a4a;
+            --text: #e8f0f5;
+            --text-dim: #6a7a8a;
+            --clinical-blue: #4a9eff;
+            --clinical-blue-glow: #4a9eff33;
+            --clinical-green: #34d399;
+            --clinical-green-glow: #34d39933;
+            --clinical-amber: #fbbf24;
+            --clinical-amber-glow: #fbbf2433;
+            --clinical-red: #f87171;
+            --clinical-red-glow: #f8717133;
+            --accent: #4a9eff;
+            --accent-glow: #4a9eff55;
+        }
+        
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .app-container {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            min-height: 100vh;
+        }
+        
+        @media (max-width: 1200px) {
+            .app-container {
+                grid-template-columns: 1fr;
+            }
+            .panel {
+                order: -1;
+            }
+        }
+        
+        /* Analysis Stage */
+        .stage {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+        }
+        
+        .stage-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 30px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .logo {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logo-icon {
+            font-size: 26px;
+        }
+        
+        .logo span {
+            color: var(--clinical-blue);
+        }
+        
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .info-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .info-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 18px;
+            color: var(--clinical-blue);
+        }
+        
+        .info-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+        
+        /* Video Area */
+        .video-area {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+            background: linear-gradient(180deg, var(--surface) 0%, #0a0f14 100%);
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid var(--border);
+        }
+        
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+        
+        #poseCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .walking-indicator {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 50px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .walking-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--clinical-red);
+        }
+        
+        .walking-dot.active {
+            background: var(--clinical-green);
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 var(--clinical-green-glow); }
+            50% { box-shadow: 0 0 15px 5px var(--clinical-green-glow); }
+        }
+        
+        /* Side Overlay Metrics */
+        .side-metrics {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .side-metric {
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 10px;
+            min-width: 100px;
+        }
+        
+        .side-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        
+        .side-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+        
+        /* Loading Overlay */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--surface);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            z-index: 100;
+            border-radius: 16px;
+        }
+        
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid var(--border);
+            border-top-color: var(--clinical-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .loading-text {
+            font-size: 18px;
+            color: var(--text-dim);
+        }
+        
+        /* Instructions */
+        .instructions-banner {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 14px 28px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 50px;
+            font-size: 14px;
+            color: var(--text-dim);
+            text-align: center;
+        }
+        
+        /* Control Panel */
+        .panel {
+            background: var(--surface);
+            padding: 30px;
+            overflow-y: auto;
+            max-height: 100vh;
+        }
+        
+        .panel-section {
+            margin-bottom: 30px;
+        }
+        
+        .panel-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+        }
+        
+        /* Metrics Grid */
+        .metrics-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .metric-card {
+            padding: 16px;
+            background: var(--surface-light);
+            border-radius: 12px;
+            border-left: 4px solid var(--border);
+        }
+        
+        .metric-card.normal {
+            border-left-color: var(--clinical-green);
+        }
+        
+        .metric-card.warning {
+            border-left-color: var(--clinical-amber);
+        }
+        
+        .metric-card.alert {
+            border-left-color: var(--clinical-red);
+        }
+        
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .metric-name {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        
+        .metric-status {
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        
+        .metric-status.normal {
+            background: var(--clinical-green-glow);
+            color: var(--clinical-green);
+        }
+        
+        .metric-status.warning {
+            background: var(--clinical-amber-glow);
+            color: var(--clinical-amber);
+        }
+        
+        .metric-status.alert {
+            background: var(--clinical-red-glow);
+            color: var(--clinical-red);
+        }
+        
+        .metric-value-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        
+        .metric-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--clinical-blue);
+        }
+        
+        .metric-unit {
+            font-size: 14px;
+            color: var(--text-dim);
+        }
+        
+        .metric-range {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 6px;
+        }
+        
+        .metric-bar {
+            height: 6px;
+            background: var(--surface);
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        
+        .metric-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--clinical-blue), var(--clinical-green));
+            border-radius: 3px;
+            transition: all 0.3s ease;
+        }
+        
+        /* Control Buttons */
+        .control-buttons {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .control-btn {
+            flex: 1;
+            padding: 14px;
+            background: var(--surface-light);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .control-btn:hover {
+            border-color: var(--clinical-blue);
+            box-shadow: 0 0 15px var(--clinical-blue-glow);
+        }
+        
+        .control-btn.active {
+            background: var(--clinical-blue);
+            color: white;
+            border-color: var(--clinical-blue);
+        }
+        
+        .control-btn.primary {
+            background: var(--clinical-blue);
+            color: white;
+            border-color: var(--clinical-blue);
+        }
+        
+        .control-btn.danger {
+            border-color: var(--clinical-red);
+        }
+        
+        .control-btn.danger:hover {
+            background: var(--clinical-red);
+            color: white;
+        }
+        
+        /* Session Stats */
+        .session-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .session-stat {
+            padding: 16px;
+            background: var(--surface-light);
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .session-value {
+            font-size: 24px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--clinical-blue);
+        }
+        
+        .session-label {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+        
+        /* Calibration Values */
+        .calibration-section {
+            padding: 20px;
+            background: var(--surface-light);
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .calibration-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .calibration-label {
+            font-size: 14px;
+        }
+        
+        .calibration-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            color: var(--text-dim);
+        }
+        
+        /* Export Section */
+        .export-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .export-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--surface-light);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .export-btn:hover {
+            border-color: var(--clinical-blue);
+            box-shadow: 0 0 15px var(--clinical-blue-glow);
+        }
+        
+        /* Normal Range Guide */
+        .range-guide {
+            padding: 16px;
+            background: var(--surface-light);
+            border-radius: 12px;
+        }
+        
+        .range-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .range-list {
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.8;
+        }
+        
+        .range-list strong {
+            color: var(--text);
+        }
+        
+        /* Hidden */
+        .hidden {
+            display: none !important;
+        }
+        
+        /* FPS Display */
+        .fps-display {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            padding: 8px 12px;
+            background: rgba(0,0,0,0.7);
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="stage">
+            <div class="stage-header">
+                <div class="logo">
+                    <span class="logo-icon">🦶</span>
+                    <span>GAIT ANALYZER</span>
+                </div>
+                <div class="session-info">
+                    <div class="info-item">
+                        <div class="info-value" id="stepCount">0</div>
+                        <div class="info-label">Steps</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-value" id="sessionTime">00:00</div>
+                        <div class="info-label">Time</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-value" id="fpsDisplay">0</div>
+                        <div class="info-label">FPS</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="video-area">
+                <div class="video-container">
+                    <video id="webcam" autoplay playsinline></video>
+                    <canvas id="poseCanvas"></canvas>
+                    
+                    <div class="walking-indicator">
+                        <div class="walking-dot" id="walkingDot"></div>
+                        <span id="walkingStatus">Detecting...</span>
+                    </div>
+                    
+                    <div class="side-metrics">
+                        <div class="side-metric">
+                            <div class="side-value" id="stridesPerMin">0</div>
+                            <div class="side-label">Stride/Min</div>
+                        </div>
+                        <div class="side-metric">
+                            <div class="side-value" id="gaitSymmetry">0%</div>
+                            <div class="side-label">Symmetry</div>
+                        </div>
+                        <div class="side-metric">
+                            <div class="side-value" id="balanceScore">0</div>
+                            <div class="side-label">Balance</div>
+                        </div>
+                    </div>
+                    
+                    <div class="loading-overlay" id="loadingOverlay">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">Initializing Pose Detection...</div>
+                    </div>
+                    
+                    <div class="instructions-banner">
+                        Stand in view and walk naturally. System will detect gait parameters.
+                    </div>
+                    
+                    <div class="fps-display" id="fpsCounter"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="control-buttons">
+                <button class="control-btn primary" id="startBtn">Start</button>
+                <button class="control-btn" id="pauseBtn" disabled>Pause</button>
+                <button class="control-btn danger" id="resetBtn">Reset</button>
+            </div>
+            
+            <div class="panel-section">
+                <div class="panel-title">Session Statistics</div>
+                <div class="session-stats">
+                    <div class="session-stat">
+                        <div class="session-value" id="totalSteps">0</div>
+                        <div class="session-label">Total Steps</div>
+                    </div>
+                    <div class="session-stat">
+                        <div class="session-value" id="avgSpeed">0</div>
+                        <div class="session-label">Avg Speed</div>
+                    </div>
+                    <div class="session-stat">
+                        <div class="session-value" id="maxSpeed">0</div>
+                        <div class="session-label">Max Speed</div>
+                    </div>
+                    <div class="session-stat">
+                        <div class="session-value" id="sessionDuration">0:00</div>
+                        <div class="session-label">Duration</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <div class="panel-title">Gait Metrics</div>
+                <div class="metrics-grid">
+                    <div class="metric-card normal">
+                        <div class="metric-header">
+                            <div class="metric-name">Cadence</div>
+                            <div class="metric-status normal">Normal</div>
+                        </div>
+                        <div class="metric-value-row">
+                            <div class="metric-value" id="cadenceValue">0</div>
+                            <div class="metric-unit">steps/min</div>
+                        </div>
+                        <div class="metric-range">Normal: 100-130 steps/min</div>
+                        <div class="metric-bar">
+                            <div class="metric-bar-fill" id="cadenceBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card normal">
+                        <div class="metric-header">
+                            <div class="metric-name">Stride Length</div>
+                            <div class="metric-status normal">Normal</div>
+                        </div>
+                        <div class="metric-value-row">
+                            <div class="metric-value" id="strideLengthValue">0</div>
+                            <div class="metric-unit">cm</div>
+                        </div>
+                        <div class="metric-range">Normal: 40-85 cm</div>
+                        <div class="metric-bar">
+                            <div class="metric-bar-fill" id="strideLengthBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card normal">
+                        <div class="metric-header">
+                            <div class="metric-name">Step Time</div>
+                            <div class="metric-status normal">Normal</div>
+                        </div>
+                        <div class="metric-value-row">
+                            <div class="metric-value" id="stepTimeValue">0</div>
+                            <div class="metric-unit">ms</div>
+                        </div>
+                        <div class="metric-range">Normal: 400-600 ms</div>
+                        <div class="metric-bar">
+                            <div class="metric-bar-fill" id="stepTimeBar" style="width: 50%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card normal">
+                        <div class="metric-header">
+                            <div class="metric-name">Gait Symmetry</div>
+                            <div class="metric-status normal">Normal</div>
+                        </div>
+                        <div class="metric-value-row">
+                            <div class="metric-value" id="symmetryValue">0</div>
+                            <div class="metric-unit">%</div>
+                        </div>
+                        <div class="metric-range">Normal: >90% symmetry</div>
+                        <div class="metric-bar">
+                            <div class="metric-bar-fill" id="symmetryBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <div class="panel-title">Export Data</div>
+                <div class="export-section">
+                    <button class="export-btn" id="exportCSVBtn">
+                        📊 Export CSV
+                    </button>
+                    <button class="export-btn" id="exportPDFBtn">
+                        📄 Export PDF
+                    </button>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <div class="range-guide">
+                    <div class="range-title">ℹ️ Normal Ranges</div>
+                    <div class="range-list">
+                        <strong>Cadence:</strong> 100-130 steps/min<br>
+                        <strong>Stride Length:</strong> 40-85 cm<br>
+                        <strong>Step Time:</strong> 400-600 ms<br>
+                        <strong>Symmetry:</strong> >90%
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const config = {
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/${file}`;
+            }
+        };
+        
+        let pose;
+        let camera;
+        let isAnalyzing = false;
+        let sessionStartTime = null;
+        let stepCount = 0;
+        let frameCount = 0;
+        let lastFrameTime = Date.now();
+        let fpsHistory = [];
+        let poseData = [];
+        
+        // Initialize Pose Detection
+        async function initializePose() {
+            pose = new Pose(config);
+            pose.setOptions({
+                modelComplexity: 1,
+                smoothLandmarks: true,
+                enableSegmentation: false,
+                enableSmoothing: true
+            });
+            
+            pose.onResults(onPoseResults);
+            
+            const videoElement = document.getElementById('webcam');
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await pose.send({ image: videoElement });
+                },
+                width: 1280,
+                height: 720
+            });
+            
+            await camera.initialize();
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+        
+        function onPoseResults(results) {
+            const canvas = document.getElementById('poseCanvas');
+            const canvasCtx = canvas.getContext('2d');
+            
+            // Clear canvas
+            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (results.poseLandmarks && isAnalyzing) {
+                // Draw pose landmarks
+                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {
+                    color: '#4a9eff',
+                    lineWidth: 2
+                });
+                drawLandmarks(canvasCtx, results.poseLandmarks, {
+                    color: '#34d399',
+                    radius: 4
+                });
+                
+                // Analyze gait
+                analyzeGait(results.poseLandmarks);
+                updateMetrics();
+            }
+            
+            // Update FPS
+            frameCount++;
+            const now = Date.now();
+            const elapsed = now - lastFrameTime;
+            if (elapsed >= 1000) {
+                const fps = frameCount;
+                fpsHistory.push(fps);
+                if (fpsHistory.length > 30) fpsHistory.shift();
+                document.getElementById('fpsDisplay').textContent = fps;
+                frameCount = 0;
+                lastFrameTime = now;
+            }
+        }
+        
+        function drawConnectors(ctx, landmarks, connections, style) {
+            ctx.strokeStyle = style.color;
+            ctx.lineWidth = style.lineWidth;
+            connections.forEach(connection => {
+                const [start, end] = connection;
+                const startLandmark = landmarks[start];
+                const endLandmark = landmarks[end];
+                ctx.beginPath();
+                ctx.moveTo(startLandmark.x * canvas.width, startLandmark.y * canvas.height);
+                ctx.lineTo(endLandmark.x * canvas.width, endLandmark.y * canvas.height);
+                ctx.stroke();
+            });
+        }
+        
+        function drawLandmarks(ctx, landmarks, style) {
+            ctx.fillStyle = style.color;
+            landmarks.forEach(landmark => {
+                ctx.beginPath();
+                ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, style.radius, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+        }
+        
+        function analyzeGait(landmarks) {
+            // Simple gait analysis - calculate distances between key points
+            if (landmarks.length < 33) return;
+            
+            const leftHip = landmarks[23];
+            const rightHip = landmarks[24];
+            const leftKnee = landmarks[25];
+            const rightKnee = landmarks[26];
+            const leftAnkle = landmarks[27];
+            const rightAnkle = landmarks[28];
+            
+            poseData.push({
+                timestamp: Date.now(),
+                landmarks: landmarks
+            });
+        }
+        
+        function updateMetrics() {
+            if (!isAnalyzing) return;
+            
+            // Update session time
+            const elapsed = (Date.now() - sessionStartTime) / 1000;
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = Math.floor(elapsed % 60);
+            document.getElementById('sessionTime').textContent = 
+                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            
+            // Update metrics with placeholder values
+            updateMetricCard('cadenceValue', Math.random() * 50 + 100, 100, 130);
+            updateMetricCard('strideLengthValue', Math.random() * 50 + 40, 40, 85);
+            updateMetricCard('stepTimeValue', Math.random() * 200 + 400, 400, 600);
+            updateMetricCard('symmetryValue', Math.random() * 20 + 80, 90, 100);
+        }
+        
+        function updateMetricCard(elementId, value, min, max) {
+            const element = document.getElementById(elementId);
+            element.textContent = value.toFixed(1);
+            
+            const percentage = ((value - min) / (max - min)) * 100;
+            const barId = elementId.replace('Value', 'Bar');
+            const bar = document.getElementById(barId);
+            if (bar) bar.style.width = Math.min(100, Math.max(0, percentage)) + '%';
+        }
+        
+        // Button handlers
+        document.getElementById('startBtn').addEventListener('click', () => {
+            isAnalyzing = true;
+            sessionStartTime = Date.now();
+            stepCount = 0;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            document.getElementById('walkingDot').classList.add('active');
+            document.getElementById('walkingStatus').textContent = 'Walking Detected';
+            camera.play();
+        });
+        
+        document.getElementById('pauseBtn').addEventListener('click', () => {
+            isAnalyzing = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('walkingDot').classList.remove('active');
+            document.getElementById('walkingStatus').textContent = 'Paused';
+            camera.pause();
+        });
+        
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            isAnalyzing = false;
+            stepCount = 0;
+            poseData = [];
+            sessionStartTime = null;
+            document.getElementById('stepCount').textContent = '0';
+            document.getElementById('sessionTime').textContent = '00:00';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('walkingDot').classList.remove('active');
+            document.getElementById('walkingStatus').textContent = 'Ready';
+            // Reset metrics
+            document.querySelectorAll('[id$="Value"]').forEach(el => {
+                el.textContent = '0';
+            });
+        });
+        
+        document.getElementById('exportCSVBtn').addEventListener('click', () => {
+            console.log('Export CSV');
+        });
+        
+        document.getElementById('exportPDFBtn').addEventListener('click', () => {
+            console.log('Export PDF');
+        });
+        
+        // Initialize on page load
+        window.addEventListener('load', initializePose);
+    </script>
+</body>
+</html>
